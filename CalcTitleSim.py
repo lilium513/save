@@ -6,12 +6,10 @@ from tools import  calc_cos_sim,original_text_to_parsed
 from CalcDescSim import calc_desc_sim_suggest
 import tools
 
-def calc_title_sim(t1, t2,w2model,m): #t1,t2→生のタイトル 「Yahoo乗り換え案内」
+def calc_title_sim(t1, t2,w2model =None ,m = None): #t1,t2→生のタイトル 「Yahoo乗り換え案内」
 
-    t1_words = m.parse(t1)
-    t2_words = m.parse(t2)
-    t1_words = list(map(lambda x:0,t1_words))
-    t2_words = list(map(lambda x:0,t2_words))
+    t1_words = tools.parse_jp(t1,m)
+    t2_words = tools.parse_jp(t2,m)
     nums =len(t1_words) * len(t2_words)
     if nums == 0:
         return 0
@@ -30,8 +28,6 @@ def calc_title_sim(t1, t2,w2model,m): #t1,t2→生のタイトル 「Yahoo乗り
 
     return sim_sum/nums
 
-def calc_title_sim_suggested(t1, t2,idf,avgsl,w2model,m):
-    t1_words = tools.parse_jp(t1,m)
-    t2_words = tools.parse_jp(t2,m)
+def calc_title_sim_suggested(t1_words, t2_words,idf,avgsl,w2model,m,normdic,w2dot,wtoind,cossim):
 
-    return calc_desc_sim_suggest(t1_words,t2_words,idf,avgsl,w2model)
+    return calc_desc_sim_suggest(t1_words,t2_words,idf,avgsl,w2model,normdic,w2dot,wtoind,cossim)

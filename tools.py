@@ -1,4 +1,9 @@
 #tools → 共通して使いそうなやつの纏め
+import random
+
+import gensim
+import pickle
+
 import numpy as np
 from collections import defaultdict
 import math
@@ -74,6 +79,71 @@ def load_permission():
                     app_perms_dict[app_perm] = 1  # 権限があれば1，なければ0
         dic[dir] = app_perms_dict
     return dic
+
+def load_pseudo_apps(m):
+    # return jpapps,enapps
+    corres_dict = make_corres_dict()
+
+    jp_app_files_paths = glob.glob(BASE_DIR + "pseudo_data/*/*/*.tsv")  # 30129
+
+    # ['C:/Users/limin/englishdata,Action,air.com.distractionware.vvvvvvmobile\\air.com.distractionware.vvvvvvmobile.tsv']
+    # [いらんやつ,カテゴリ(EN/JP),id,ファイル名]
+
+
+    jp_apps = list(map(lambda x: x.split("\\"), jp_app_files_paths))
+    jp_apps_dict = {}
+    for i, jp_app in enumerate(jp_apps):
+        cat = corres_dict[jp_app[1]]  # カテゴリ名→カテゴリIDに変換(言語非依存)
+        jp_apps_dict[jp_app[2]] = [jp_app_files_paths[i], cat]
+    # en_app = ['C:/Users/limin/japanesedata', 'アクション', 'air.com.distractionware.vvvvvvmobile', 'air.com.distractionware.vvvvvvmobile.tsv']
+    # corres_dict[en_app[1]] → カテゴリ番号
+    # en_app[2] → ID
+    # apps → [desc,title,[perm1,perm2,perm3],categoly]
+    # categoly → 1～61の数字で表現(言語非依存にするため) → 各 -1 する(配列的な)
+    # permissions_texts_dir[26:-4] → ID
+    # appfile→ id \t タイトル \t ジャンル \t 説明文
+
+    permissions_texts_dirs = glob.glob(PERMISSION_DIR + TEXT)
+
+    # データの読み込み
+
+    for dir in permissions_texts_dirs:
+        # 権限の処理
+
+        with open(dir, "r", encoding="utf-8") as temp:
+            keys = ["位置情報", "カメラ", "マイク"]  # TODO attentional permissions
+            values = [0] * len(keys)  # permission vector
+            app_perms_dict = dict(zip(keys, values))  # permisson dict appA → # {A:True,B:False,C:True}
+            app_perms = temp.read().split("\n")[2:]
+            for app_perm in app_perms:
+                if app_perm in app_perms_dict:
+                    app_perms_dict[app_perm] = 1  # 権限があれば1，なければ0
+        id = dir[26:-4]
+        # 日本語の記述の処理
+        if id in jp_apps_dict:
+            jp_app_path = jp_apps_dict[id][0]
+            with open(jp_app_path, "r", encoding="UTF-8") as app_data:
+                app = app_data.read()
+            # app = ここでOpen
+            app = app.split("\t")
+            title = app[1]
+            original_desc = app[3]
+            jp_apps_dict[id].append(title)
+            jp_apps_dict[id].append(original_desc)
+            jp_apps_dict[id].append(app_perms_dict)
+            parsed_desc = parse_jp(original_desc, m)
+            jp_apps_dict[id].append(parsed_desc)
+
+
+    for k, v in list(jp_apps_dict.items()):
+        if len(v) < 3:  # jpdescがないアプリを排除
+            jp_apps_dict.pop(k)
+
+    # jp_apps_dict[id]→[path,cat,titile,desc,permidic]
+    # key → application_name, value → dict{permission:bool}
+
+    return jp_apps_dict
+
 def load_apps(m,use_zipped_data=False):
     #return jpapps,enapps
     if use_zipped_data and os.path.exists(DATA_FILE) :
@@ -245,20 +315,27 @@ def load_answer(use_zipped_data=False):
             dic[answers[0]] = [answers[ANSWER_LOC],answers[ANSWER_MIKE],answers[ANSWER_CAMERA]]
     return dic
 
-def load_pseudo_apps(en_apps,use_zipped_data=False):
-    pseudo_jp_apps = []
-    translator = Translator()
-    for en_app in en_apps.values():
-        try:
-            desc = " ".join(en_app[DESC])
-            pseudo_jp_app = copy.copy(en_app)
-            pseudo_jp_app[DESC] = translator.translate(desc, dest='ja').text
-            pseudo_jp_apps.append(pseudo_jp_app)
-
-        # phase0: カテゴリ間の類似度,tf-idf,idf,tfなどの計算
-        except:
-            traceback.print_exc()
-    return pseudo_jp_apps
+def make_word_to_norm(w2vmodel):
+    word_to_norm_dict = {}
+    w_vector = w2vmodel.wv
+    voc =  list(w_vector.vocab)
+    for word in voc:
+        word_to_norm_dict[word] = np.linalg.norm(w_vector[word])
+    return word_to_norm_dict
+# def load_pseudo_apps(en_apps,use_zipped_data=False):
+#     pseudo_jp_apps = []
+#     translator = Translator()
+#     for en_app in en_apps.values():
+#         try:
+#             desc = " ".join(en_app[DESC])
+#             pseudo_jp_app = copy.copy(en_app)
+#             pseudo_jp_app[DESC] = translator.translate(desc, dest='ja').text
+#             pseudo_jp_apps.append(pseudo_jp_app)
+#
+#         # phase0: カテゴリ間の類似度,tf-idf,idf,tfなどの計算
+#         except:
+#             traceback.print_exc()
+#     return pseudo_jp_apps
 def parse_jp(text,t=None):
     日本語に対してNoneを返す正規表現 = re.compile('[ぁ-んァ-ン一-龥ー。、．，· :]+')
     HINSI = 3
@@ -275,12 +352,32 @@ def parse_jp(text,t=None):
         hinsi_splited = splited[3].split("-")
         hinsi_main =  hinsi_splited[0]
         genkei_word = splited[GENKEI]
-        if (hinsi_main == "名詞"   or hinsi_main == "動詞") and (日本語に対してNoneを返す正規表現.match(genkei_word) ):
+        if (hinsi_main == "名詞" or hinsi_main == "動詞") and (日本語に対してNoneを返す正規表現.match(genkei_word) ):
             text_parsed.append(genkei_word)
     return text_parsed
 
-def calc_cos_sim(v1, v2):
-    result = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+def calc_cos_sim_using_normdic(w1,w2,v1,v2,normdic,dot_dic_w2v,wtoind):
+     return calc_cos_sim(v1,v2,n1=normdic[w1],n2=normdic[w2],dot = dot_dic_w2v[wtoind[w1]][wtoind[w2]])
+
+def make_word_dot_dict(words,w2vmodel):
+    d = {}
+    wv = w2vmodel.wv
+    for w1 in words:
+        dd = {}
+        for w2 in words:
+            dd[w2] = np.dot(wv[w1],wv[w2])
+        d[w1] = dd
+    return d #d[w1][w2]で内積を得る
+
+
+def calc_cos_sim(v1, v2,n1 = None,n2 = None,dot = None):
+    if n1 == None:
+        n1 = np.linalg.norm(v1)
+    if n2 == None:
+        n2 = np.linalg.norm(v2)
+    if dot ==None:
+        dot = np.dot(v1, v2)
+    result = dot / (n1* n2)
     if np.isnan(result):
         result = 0
     return result
@@ -366,6 +463,7 @@ def original_text_to_parsed(text,fil = None): # fil→フィルター 品詞と�
     return parsed_text_filtered
 
 
+
 def my_filter (parsed_and_postagged,nokosu_hinsi = []):
 
     """
@@ -415,5 +513,98 @@ def load_answers():
     for path in paths:
         with open(path,"r") as f:
             temp = f.read().split("\n")
+
+            print(path)
             di[temp[0]] = [temp[1],temp[2],temp[3]]
     return di
+
+def merge_2_cat(c1,c2):
+    newc = defaultdict(lambda :{})
+    for k1,v1 in c1.items():
+        for k2,v2 in v1.items():
+            newc[k1][k2] = (c1[k1][k2] + c2[k1][k2])/2
+    return newc
+
+def load_dot_dic(): #w1とw2でその内積を返す辞書
+
+    dot_dic =   np.load("npsave2.npy")
+    with open("vtoind.pickle","rb") as f:
+        vtoind = pickle.load(f)
+    with open("allvocab.pickle", "rb") as f:
+        all_v = pickle.load(f)
+    dic = {}
+    all_v = list(all_v)
+    for v1 in all_v[:-1]:
+        dic2 = {}
+        for v2 in all_v[:-1]:
+            i1 = vtoind[v1]
+            i2 = vtoind[v2]
+            dic2[v2] = dot_dic[i1][i2]
+        dic[v1] = dic2
+    return dic
+
+def make_dot_dic(): #ind(w)２つでそのdotを返す配列を作る巻数
+
+    with open("allvocab.pickle", "rb") as f:
+        all_v = pickle.load(f)
+    # with open("allvocab.pickle", "wb") as f:
+    #     pickle.dump(all_v,f)
+
+    w2_model = gensim.models.Word2Vec.load('ja/ja.bin')
+    wv = w2_model.wv
+    l = len(all_v)
+    dot_dic = [-1] *l
+    vtoind = dict(zip(all_v, list(range(l)))) #単語から数値に直す辞書 これによりピックルできるようにする
+    for i, v1 in enumerate(all_v):
+        tempdic = [-1] * (l)
+        for j, v2 in enumerate(all_v[i:]):
+            id2 = vtoind[v2]
+            tempdic[id2] = np.dot(wv[v1], wv[v2])
+        id1 = vtoind[v1]
+        dot_dic[id1] = tempdic
+        if i % 10 == 0:
+            print(str(i) + "/" + str(l))
+    # with open("dot_dic.pickle", "wb") as f:
+    #     pickle.dump(dot_dic, f)
+    return dot_dic
+
+
+def random_pick_apps(N=30):
+    with open("jp_apps_dict.pickle", "rb") as f:
+        jp_apps = pickle.load(f)
+    apps_per_perms = []
+    for i in range(3):
+        apps_per_perm = []
+        for app in jp_apps.values():
+            if app[PERM][i] == 1:
+                apps_per_perm.append(app) #TODO ここIDで
+
+        l = len(apps_per_perm)
+        temp = random.sample(apps_per_perm,N)
+        apps_per_perms.append(temp)
+    return apps_per_perms
+    #これで30*3の90アプリが選出される これを対象として評価
+
+def get_cos_sim_between_2words():
+    w2_model = gensim.models.Word2Vec.load('ja/ja.bin')
+    dd = np.load("words2dot.npy")
+    normdic_w2v = make_word_to_norm(w2_model)
+    w2ind = np.load("vtoind.pickle")
+    vocab = list(w2ind.keys())
+    l = len(vocab)
+    cos_sim = []
+    for i,v1 in enumerate(vocab):
+        print(str(i)+"/"+str(l))
+        temp1 =[]
+        for v2 in vocab:
+            id1 = w2ind[v1]
+            id2 = w2ind[v2]
+            dot = dd[id1][id2]
+            if dot == -1:
+                dot = dd[id2][id1]
+            n1 = normdic_w2v[v1]
+            n2 = normdic_w2v[v2]
+            result = dot / (n1 * n2)
+            temp1.append(result)
+        cos_sim.append(temp1)
+    return cos_sim #cos_sim[wtoind[w1]][wtoind[w2]] → cos sim between two words
