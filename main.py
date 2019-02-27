@@ -124,13 +124,15 @@ def main2():
     cossim = np.load("cossim.npy")
     # dot_dic_w2v [w2ind[w1]][w2ind [w2]]
     all_q = len(questions)
-    for noq,question in enumerate(list(questions.keys())[7:11]):
+    for noq,question in enumerate(list(questions.keys())):
         print("Question")
         print(str(noq)+"/"+str(all_q))
         id = question
         if id not in jp_apps:
             continue
         target_app = jp_apps[id]
+        if len(target_app[5]) >100 or len(target_app[5]) <1:
+            continue
         cot = 0
         answers_per_question ={} #keyが条件のstrを結合したもの
         for c3 in [True, False]:  # 各条件で正解を選択する

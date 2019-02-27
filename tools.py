@@ -247,6 +247,57 @@ def make_corres_dict():
     return corres_dict
 
 
+def evaluate(all_answers,m,w2_model):
+    evaluete_per_question = {} #app_idでアクセス
+    questions = load_answers()
+    for k,question in questions.items(): #k→app id
+        print("here")
+        gold_answers = question
+        id = k
+        if id not in all_answers:
+            continue
+        answers_per_app = all_answers[id] #{cond1:[],cond2:[]}
+        evaluete_per_condition = {} #101などがkey
+        for c,answers_per_condition in answers_per_app.items(): #cond1:[[1,2,3],[1,2,3],[1,2,3]]
+            evaluate_per_perm_jac = []
+            evaluate_per_perm_w2v = []
+            for gold_answer,answers_per_permission in zip(gold_answers,answers_per_condition):
+
+                gold_answer_parsed = parse_jp(gold_answer, m)
+                #gold answer は一つ，answerは複数
+                size =5
+                if len(answers_per_permission) == 1:
+                    answers_per_permission = answers_per_permission[0]
+                for answers in answers_per_permission: #[1,2,3]→1,2,3という感じでイテレーション
+                    #answer→5つくらいの候補の一つ
+                    if len(answers ) == 5:
+                        jaccard_score = 0  # [1,2,3]
+                        w2v_score = 0
+                        for answer in answers:
+                            #TODO compare answer and gold answer after so , take average this
+                            answer_parsed = parse_jp(answer,m)
+                            jaccard_score += calc_jaccard_distance(answer_parsed, gold_answer_parsed)
+                            w2v_score += calc_w2v_score(answer_parsed, gold_answer_parsed, w2_model)
+                            break
+
+                    else:
+                        jaccard_score = 0  # [1,2,3]
+                        w2v_score = 0
+                        #TODO compare answer and gold answer after so , take average this
+                        answer_parsed = parse_jp(answers,m)
+                        jaccard_score += calc_jaccard_distance(answer_parsed, gold_answer_parsed)
+                        w2v_score += calc_w2v_score(answer_parsed, gold_answer_parsed, w2_model)
+                jaccard_score /= size
+                w2v_score /= size
+                evaluate_per_perm_jac.append(jaccard_score)
+                evaluate_per_perm_w2v.append(w2v_score)
+                    #各スコアは permission へのスコア 位置情報,カメラ，マイク
+            evaluete_per_condition[c] = {"jac":evaluate_per_perm_jac,"w2v":evaluate_per_perm_w2v}
+        evaluete_per_question[id] = evaluete_per_condition
+
+    return evaluete_per_question
+
+
 # 権限と単語に関する相互情報量を求めたい M(word,p) = d(word,p) / (d(word) * d(p))
 # doc = {categoly : c1,permssion:[p1,p2],description:[w1,w2,w3]}
 # 日本語データを使ったときとそうでないときの差を見てみる
@@ -514,7 +565,7 @@ def load_answers():
         with open(path,"r") as f:
             temp = f.read().split("\n")
 
-            print(path)
+            # print(path)
             di[temp[0]] = [temp[1],temp[2],temp[3]]
     return di
 
